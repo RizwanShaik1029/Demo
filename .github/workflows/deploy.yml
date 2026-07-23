@@ -18,14 +18,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-
-      - name: Cache Maven Dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven
+          cache: maven
 
       - name: Build Project
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
         run: mvn clean package
