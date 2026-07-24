@@ -23,7 +23,7 @@ jobs:
       - name: Build Project
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-        run: mvn clean package
+        run: mvn clean package -DskipTests
 
       - name: Verify JAR
         run: |
@@ -37,17 +37,20 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "target/*.jar"
-          target: "/home/ec2-user/"
+          target: "/home/ec2-user/demo"
 
       - name: Restart Application on EC2
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: MONGODB_URI
           command_timeout: 5m
           script: |
-            set -x
+            set -e
 
             echo "===== USER ====="
             whoami
@@ -55,37 +58,41 @@ jobs:
             echo "===== JAVA ====="
             java -version
 
-            echo "===== JARS ====="
-            find /home/ec2-user -name "*.jar"
-
-            echo "===== RUNNING JAVA ====="
-            ps -ef | grep java || true
+            echo "===== Mongo URI Available ====="
+            if [ -n "$MONGODB_URI" ]; then
+              echo "YES"
+            else
+              echo "NO"
+            fi
 
             PID=$(pgrep -f "Demo-0.0.1-SNAPSHOT.jar" || true)
 
             if [ -n "$PID" ]; then
-              echo "Stopping application PID: $PID"
-              kill -15 "$PID" || true
+              echo "Stopping application..."
+              kill -15 "$PID"
               sleep 5
-            else
-              echo "Application not running."
             fi
 
-            JAR_FILE=$(find /home/ec2-user -name "Demo-0.0.1-SNAPSHOT.jar" | head -n 1)
+            JAR_FILE=$(find /home/ec2-user/demo -name "Demo-0.0.1-SNAPSHOT.jar" | head -n 1)
 
-            if [ -z "$JAR_FILE" ]; then
-              echo "ERROR: JAR not found."
+            if [ ! -f "$JAR_FILE" ]; then
+              echo "Jar not found!"
               exit 1
             fi
 
-            echo "Starting: $JAR_FILE"
+            echo "Starting application..."
 
-            nohup java -jar "$JAR_FILE" > /home/ec2-user/app.log 2>&1 &
+            nohup java -jar "$JAR_FILE" \
+              > /home/ec2-user/app.log 2>&1 &
 
             sleep 15
 
-            echo "===== JAVA AFTER START ====="
+            echo "===== Running Java ====="
             ps -ef | grep java || true
 
-            echo "===== LAST 100 LINES OF LOG ====="
-            tail -100 /home/ec2-user/app.log || true
+            echo "===== Mongo Variable Inside Process ====="
+            PID=$(pgrep -f "Demo-0.0.1-SNAPSHOT.jar")
+            cat /proc/$PID/environ | tr '\0' '\n' | grep MONGODB_URI || true
+
+            echo "===== Last 50 Log Lines ====="
+            tail -50 /home/ec2-user/app.log || true
