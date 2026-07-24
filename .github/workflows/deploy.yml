@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Java 21
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,11 +25,6 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
         run: mvn clean package -DskipTests
 
-      - name: Verify JAR
-        run: |
-          echo "Contents of target:"
-          ls -lh target
-
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -39,7 +34,7 @@ jobs:
           source: "target/*.jar"
           target: "/home/ec2-user/demo"
 
-      - name: Restart Application on EC2
+      - name: Restart Application
         uses: appleboy/ssh-action@v1.2.0
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
@@ -48,51 +43,15 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: MONGODB_URI
-          command_timeout: 5m
           script: |
-            set -e
+            pkill -f "Demo-0.0.1-SNAPSHOT.jar" || true
+            sleep 5
 
-            echo "===== USER ====="
-            whoami
+            cd /home/ec2-user/demo
 
-            echo "===== JAVA ====="
-            java -version
+            nohup java -jar Demo-0.0.1-SNAPSHOT.jar > /home/ec2-user/app.log 2>&1 &
 
-            echo "===== Mongo URI Available ====="
-            if [ -n "$MONGODB_URI" ]; then
-              echo "YES"
-            else
-              echo "NO"
-            fi
+            sleep 10
 
-            PID=$(pgrep -f "Demo-0.0.1-SNAPSHOT.jar" || true)
-
-            if [ -n "$PID" ]; then
-              echo "Stopping application..."
-              kill -15 "$PID"
-              sleep 5
-            fi
-
-            JAR_FILE=$(find /home/ec2-user/demo -name "Demo-0.0.1-SNAPSHOT.jar" | head -n 1)
-
-            if [ ! -f "$JAR_FILE" ]; then
-              echo "Jar not found!"
-              exit 1
-            fi
-
-            echo "Starting application..."
-
-            nohup java -jar "$JAR_FILE" \
-              > /home/ec2-user/app.log 2>&1 &
-
-            sleep 15
-
-            echo "===== Running Java ====="
-            ps -ef | grep java || true
-
-            echo "===== Mongo Variable Inside Process ====="
-            PID=$(pgrep -f "Demo-0.0.1-SNAPSHOT.jar")
-            cat /proc/$PID/environ | tr '\0' '\n' | grep MONGODB_URI || true
-
-            echo "===== Last 50 Log Lines ====="
-            tail -50 /home/ec2-user/app.log || true
+            ps -ef | grep java
+            tail -50 /home/ec2-user/app.log
